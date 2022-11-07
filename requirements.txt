@@ -1,0 +1,10 @@
+# torch
+torchaudio
+transformers
+datasets
+jiwer
+librosa
+soundfile
+mir_eval
+asteroid
+espnet
