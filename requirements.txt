@@ -8,3 +8,5 @@ soundfile
 mir_eval
 asteroid
 espnet
+omegaconf
+pyannote.audio
