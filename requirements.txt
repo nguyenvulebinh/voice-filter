@@ -1,7 +1,7 @@
 # torch
 # torchaudio
 transformers==4.24.0
-datasets==0.9.0
+datasets==2.6.1
 jiwer==2.5.1
 librosa==0.8.1
 SoundFile==0.10.3.post1
