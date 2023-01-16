@@ -11,6 +11,7 @@ Authors
 import torch
 import math
 from packaging import version
+import random
 
 
 def compute_amplitude(waveforms, lengths=None, amp_type="avg", scale="linear"):
@@ -103,6 +104,57 @@ def normalize(waveforms, lengths=None, amp_type="avg", eps=1e-14):
         waveforms = waveforms.squeeze(0)
     return waveforms / den
 
+
+def remove_signal(wavform, num_t_mask=2, max_p=0.15, sample_rate=16000):
+    # ignore wav < 3s
+    if wavform.size(-1) < sample_rate * 3:
+        return wavform
+    list_remove_idx = []
+
+    for _ in range(num_t_mask):
+        max_t = int(wavform.size(-1) * max_p)
+        start = random.randint(0, wavform.size(-1) - 1)
+        length = random.randint(1, max_t)
+        end = min(wavform.size(-1), start + length)
+        wavform[start:end] = 0.
+        list_remove_idx.append([start, end])
+    
+    list_remove_idx.sort(key=lambda item: item[0])
+
+    merge_remove_idx = [list_remove_idx[0]]
+
+    for item in list_remove_idx[1:]:
+        if item[0] < merge_remove_idx[-1][1]:
+            merge_remove_idx[-1][1] = item[1]
+        else:
+            merge_remove_idx.append(item)
+    
+    merge_remove_idx = [[0, 0]] + merge_remove_idx + [[wavform.size(-1), wavform.size(-1)]]
+
+    for i in range(1, len(merge_remove_idx), 1):
+        start = merge_remove_idx[i-1][1]
+        end = merge_remove_idx[i][0]
+        # remove signal less than 1.5 sec
+        if end - start < sample_rate * 1.5:
+            wavform[start:end] = 0.
+
+    return wavform
+
+def pad_signal(wavform, max_end, pad_size):
+    """
+    max_end: signal can not put after max_end
+    pad_size: signal size after pad
+    """
+    if wavform.size(-1) > pad_size:
+        wavform = wavform[:pad_size]
+    if max_end > pad_size:
+        max_end = pad_size
+
+    audio_pad = torch.zeros((pad_size,))
+    start = random.randint(0, max_end - wavform.size(-1))
+    audio_pad[start:start + wavform.size(-1)] = wavform
+    return audio_pad
+    
 
 def rescale(waveforms, lengths, target_lvl, amp_type="avg", scale="linear"):
     """This functions performs signal rescaling to a target level.

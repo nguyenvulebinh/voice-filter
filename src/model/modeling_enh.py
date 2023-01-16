@@ -5,8 +5,8 @@ from typing import Union, Tuple
 
 from torch import nn
 from transformers import PreTrainedModel
-from .configuration_asr_voicefilter import ASRVoiceFilterConfig
-from .enh_s2t_task import EnhancementTask
+from src.model.configuration_voicefilter import VoiceFilterConfig
+from src.model.enh_s2t_task import EnhancementTask
 
 import torch
 from transformers.utils import ModelOutput
@@ -14,18 +14,19 @@ from typing import Optional
 import argparse
 import math
 from src.utils.signal_processing import normalize
+from src.net.xvector_sincnet import XVectorSincNet
 
 
-class ASRVoiceFilterOutput(ModelOutput):
+class VoiceFilterOutput(ModelOutput):
     loss: Optional[torch.FloatTensor] = None
     logits: Optional[Tuple[torch.FloatTensor]] = None
     output_text: Optional[Tuple[torch.FloatTensor]] = None
     output_speech: Optional[Tuple[torch.FloatTensor]] = None
     
 
-class ASRVoiceFilter(PreTrainedModel):
-    config_class = ASRVoiceFilterConfig
-    base_model_prefix = "asr_voicefilter"
+class VoiceFilter(PreTrainedModel):
+    config_class = VoiceFilterConfig
+    base_model_prefix = "voicefilter"
 
     def __init__(self, config):
         super().__init__(config)
@@ -33,6 +34,16 @@ class ASRVoiceFilter(PreTrainedModel):
         self.enh_model = EnhancementTask.build_model(args)
         self.enh_model._requires_grad = True
         self.wav_chunk_size = config.enh_chunk_size * config.sample_rate
+        self.filter_condition_transform = nn.Linear(args.xvector_emb_dim * 2, args.xvector_emb_dim)
+        self.xvector_model = XVectorSincNet()
+        self.dropout = nn.Dropout(0.3)
+
+    def load_xvector_sincnet_model(self, model_file):
+        meta = torch.load(model_file, map_location='cpu')['state_dict']
+        print('load_xvector_sincnet_model', self.xvector_model.load_state_dict(meta, strict=False))
+        self.xvector_model = self.xvector_model.eval()
+        for param in self.xvector_model.parameters():
+            param.requires_grad = False
     
     def chunk_split(self, speech, speech_lengths, target_spk_embedding, target_speech=None):
         assert speech.size(-1) % self.wav_chunk_size == 0
@@ -70,36 +81,39 @@ class ASRVoiceFilter(PreTrainedModel):
         ).output_speech[0][:speech_lengths].squeeze()
         return enh_speech
     
-    def forward(self, speech, speech_lengths, target_speech=None, 
-                target_spk_embedding=None, 
-                text=None, text_input=None, text_ctc=None):
+    def forward(self, speech, speech_lengths, 
+                target_speech=None, target_spk_embedding=None):
                 # model forward
-        
         loss_enh = None
-        if self.enh_model is not None:
-            # # enh forward
-            speech_chunk, target_spk_embedding, sample_num_chunks, target_speech_chunk = self.chunk_split(speech, speech_lengths, target_spk_embedding, target_speech)
-            speech_chunk_lengths =  torch.ones(speech_chunk.shape[0]).int().fill_(speech_chunk.shape[1])
-            speech_pre_chunk, feature_mix, feature_pre, others = self.enh_model.forward_enhance(
-                speech_mix=speech_chunk,
-                speaker_embed=target_spk_embedding,
-                speech_lengths=speech_chunk_lengths
-            )
-            speech_pre = self.merge_chunk(speech_pre_chunk[0], sample_num_chunks, speech.size(-1), speech_lengths)
-            
-            
-            if target_speech is not None:                
-                loss_enh, _, _ = self.enh_model.forward_loss(
-                    [speech_pre],
-                    speech_lengths,
-                    None,
-                    None,
-                    others,
-                    target_speech
-                ) 
+
+        # enh forward
+        speech_chunk, target_spk_embedding, sample_num_chunks, target_speech_chunk = self.chunk_split(speech, speech_lengths, target_spk_embedding, target_speech)
+        
+        speech_chunk_spk_embedding = self.xvector_model(speech_chunk.unsqueeze(1))
+        speaker_embed = torch.concat([target_spk_embedding, speech_chunk_spk_embedding], dim=-1)
+        speaker_embed = self.filter_condition_transform(self.dropout(speaker_embed))
+
+        speech_chunk_lengths =  torch.ones(speech_chunk.shape[0]).int().fill_(speech_chunk.shape[1])
+        speech_pre_chunk, feature_mix, feature_pre, others = self.enh_model.forward_enhance(
+            speech_mix=speech_chunk,
+            speaker_embed=speaker_embed,
+            speech_lengths=speech_chunk_lengths
+        )
+        speech_pre = self.merge_chunk(speech_pre_chunk[0], sample_num_chunks, speech.size(-1), speech_lengths)
+        
+        
+        if target_speech is not None:                
+            loss_enh, _, _ = self.enh_model.forward_loss(
+                [speech_pre],
+                speech_lengths,
+                None,
+                None,
+                others,
+                target_speech
+            ) 
                     
         # Only do speech enh
-        return ASRVoiceFilterOutput(
+        return VoiceFilterOutput(
             loss=loss_enh,
             output_speech=speech_pre
         )
