@@ -8,5 +8,3 @@ SoundFile==0.10.3.post1
 mir-eval==0.7
 asteroid==0.6.0
 espnet==202209
-omegaconf==2.2.3
-pyannote.audio==2.1.1

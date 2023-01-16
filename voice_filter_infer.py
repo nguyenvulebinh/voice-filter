@@ -16,14 +16,6 @@ if use_gpu:
     if not torch.cuda.is_available():
         use_gpu = False
         
-        
-def load_xvector_sincnet_model(model_file):
-    meta = torch.load(model_file, map_location='cpu')['state_dict']
-    xvector_model = XVectorSincNet()
-    print('load_xvector_sincnet_model', xvector_model.load_state_dict(meta, strict=False))
-    xvector_model = xvector_model.eval()
-    return xvector_model
-
 def cal_xvector_sincnet_embedding(xvector_model, ref_wav, max_length=5, sr=16000):
     wavs = []
     for i in range(0, len(ref_wav), max_length*sr):
@@ -41,11 +33,8 @@ if __name__ == "__main__":
     # Load models
     repo_id = 'nguyenvulebinh/voice-filter'
     enh_model = ASRVoiceFilter.from_pretrained(repo_id, cache_dir='./cache')
-    xvector_sincnet_model_path = hf_hub_download(repo_id=repo_id, filename="xvector_sincnet.pt", cache_dir='./cache')
-    xvector_model = load_xvector_sincnet_model(xvector_sincnet_model_path)
     if use_gpu:
         enh_model = enh_model.cuda()
-        xvector_model = xvector_model.cuda()
         
     # Load some audio sample
     mix_wav_path = hf_hub_download(repo_id=repo_id, filename="binh_linh_newspaper_music_noise.wav", cache_dir='./cache')
@@ -57,7 +46,7 @@ if __name__ == "__main__":
     
     
     # Calculate target speaker embedding
-    xvector = cal_xvector_sincnet_embedding(xvector_model, ref_wav)
+    xvector = cal_xvector_sincnet_embedding(enh_model.xvector_model, ref_wav)
     # Speech enhancing
     max_amp = np.abs(mixed_wav).max()
     mix_scaling = 1 / max_amp
