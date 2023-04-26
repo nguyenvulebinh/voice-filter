@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=3 uvicorn service:app --reload --port 8002
